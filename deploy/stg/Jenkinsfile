@@ -1,0 +1,106 @@
+#!/usr/bin/env groovy
+def NAME = 'realestate-bsre-legacy'
+def NAMESPACE = 'bsre'
+def RELEASE_NAME = 'bsre-legacy-stg'
+def NR_APP_NAME = "BSRE legacy - stg"
+pipeline {
+  agent {
+    kubernetes {
+      label "mypod-${UUID.randomUUID().toString()}"
+      defaultContainer 'jnlp'
+      yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+          - key: cloud.google.com/gke-preemptible
+            operator: Exists
+        weight: 100
+  containers:
+  - name: gradle
+    image: gradle:4.9.0-jdk8-slim
+    securityContext:
+      runAsUser: 0
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: gradlerepo
+      mountPath: /home/gradle/.gradle
+  - name: docker
+    image: docker
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: dockersock
+      mountPath: /var/run/docker.sock
+  - name: helm
+    image: devth/helm:v2.12.3
+    command:
+    - cat
+    tty: true
+  volumes:
+  - name: dockersock
+    hostPath:
+      path: /var/run/docker.sock
+  - name: mavenrepo
+    hostPath:
+      path: /tmp/jenkins/.m2
+  - name: gradlerepo
+    persistentVolumeClaim:
+      claimName: local-gradle-data
+      readOnly: false
+"""
+    }
+  }
+  stages {
+    stage('Image') {
+	  when { expression { return !IMAGE_EXISTS } }
+      steps {
+        container('docker') {
+          withCredentials([file(credentialsId: 'jenkins-redeo-all', variable: 'KEYFILE')]) {
+            sh """
+            docker login -u _json_key --password-stdin https://gcr.io < ${KEYFILE}
+            docker build -t gcr.io/redeo-all/${NAME}:${env.GIT_COMMIT} -f deploy/Dockerfile .
+            docker push gcr.io/redeo-all/${NAME}:${env.GIT_COMMIT}
+            """
+          }
+        }
+      }
+    }
+    stage('Registry') {
+        steps {
+            container('helm') {
+              withCredentials([file(credentialsId: 'jenkins-rcptf-stg', variable: 'GCP_KEYFILE')]) {
+                sh """
+                gcloud auth activate-service-account --key-file=${GCP_KEYFILE} --project rcptf-stg
+                gcloud container clusters get-credentials re-plat-stg --zone us-east1
+                kubectl create namespace ${NAMESPACE} --dry-run -o yaml | kubectl apply -f -
+                """
+              }
+            }
+        }
+    }
+    stage('Deploy') {
+      steps {
+        container('helm') {
+          sh """
+          helm upgrade --install --set image.tag='${env.GIT_COMMIT}' ${RELEASE_NAME} -f ./deploy/stg/values.yml ./deploy/chart --namespace ${NAMESPACE} --wait --timeout 600
+          """
+        }
+      }
+    }
+	stage('Notify') {
+	  steps {
+		container('helm') {
+		  notifyDeploy(slackChannel: "#deploys-prepro-re", newrelicAppName: "${NR_APP_NAME}", gitRevision: "${env.GIT_COMMIT}", gitBranch: "${env.TAG_NAME}")
+		}
+	  }
+	}
+  }
+}

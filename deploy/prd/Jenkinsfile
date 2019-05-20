@@ -1,0 +1,63 @@
+#!/usr/bin/env groovy
+def NAME = 'realestate-bsre-legacy'
+def NAMESPACE = 'bsre'
+def RELEASE_NAME = 'bsre-legacy-prd'
+def NR_APP_NAME = "BSRE legacy - prd"
+pipeline {
+  agent {
+    kubernetes {
+      label "mypod-${UUID.randomUUID().toString()}"
+      defaultContainer 'jnlp'
+      yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+          - key: cloud.google.com/gke-preemptible
+            operator: Exists
+        weight: 100
+  containers:
+  - name: helm
+    image: devth/helm:v2.12.3
+    command:
+    - cat
+    tty: true
+"""
+    }
+  }
+  stages {
+    stage('Registry') {
+        steps {
+            container('helm') {
+              withCredentials([file(credentialsId: 'jenkins-rcptf-prd', variable: 'GCP_KEYFILE')]) {
+                sh """
+                gcloud auth activate-service-account --key-file=${GCP_KEYFILE} --project rcptf-prd
+                gcloud container clusters get-credentials re-plat-prd --zone us-east1
+                kubectl create namespace ${NAMESPACE} --dry-run -o yaml | kubectl apply -f -
+                """
+              }
+            }
+        }
+    }
+    stage('Deploy') {
+      steps {
+        container('helm') {
+          sh """
+          helm upgrade --install --set image.tag='${env.GIT_COMMIT}' ${RELEASE_NAME} -f ./deploy/prd/values.yml ./deploy/chart --namespace ${NAMESPACE} --wait --timeout 600
+          """
+        }
+      }
+    }
+	stage('Notify') {
+	  steps {
+		container('helm') {
+		  notifyDeploy(slackChannel: "#deploys-realestate", newrelicAppName: "${NR_APP_NAME}", gitRevision: "${env.GIT_COMMIT}", gitBranch: "${env.TAG_NAME}")
+		}
+	  }
+	}
+  }
+}

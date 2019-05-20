@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bsre-legacy-{{ .Values.environment }}-{{ .Values.image.tag | lower }}
+  namespace: bsre
+  labels:
+    app.kubernetes.io/name: bsre-legacy-api-{{ .Values.environment }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: {{ .Values.image.tag }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+data:
+  NODE_ENV: {{ .Values.environment }}
+  NODE_PROFILE: {{ .Values.profile }}
+  NODE_SITE: realestate
+  NODE_SERVICE: k8
+  ZBX_SERVER_HOST: zabbix.bumeran.biz
+  ZBX_METADATA: bsre-legacy-{{ .Values.environment }}
+  ZBX_JMXPORT: "{{ .Values.jmxPort }}"
+  ZBX_GROUPID: "35"
+  ZBX_TEMPLATEID: "10804,10001,11624"
+  NR_LICENSE: "{{ .Values.newRelicLicense}}"
+  NR_APPNAME: BSRE legacy - {{ .Values.environment }}

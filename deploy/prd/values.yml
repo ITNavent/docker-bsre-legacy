@@ -1,0 +1,11 @@
+environment: prd
+replicaCount: 2
+profile: prod-k8
+maxUnavailable: 0
+jmxPort: 1099
+memoryRequest: 2048Mi
+memoryLimit: 2048Mi
+cpuRequest: 2000m
+cpuLimit: 2000m
+imagePullPolicy: IfNotPresent
+newRelicLicense: aaa0028888e13c29b9e0cd51716a7b299bf29533
